@@ -1,3 +1,0 @@
-2026-08-30 13:38:15.087142+05:30 jdbc[3]: exception
-org.h2.jdbc.JdbcSQLSyntaxErrorException: Syntax error in SQL statement "create table idempotency_keys ([*]key varchar(255) not null, created_at timestamp(6), response_body TEXT, status_code integer not null, primary key (key))"; expected "identifier"; SQL statement:
-create table idempotency_keys (key varchar(255) not null, created_at timestamp(6), response_body TEXT, status_code integer not null, primary key (key)) [42001-240]
