@@ -147,3 +147,11 @@ Tests run against a separate in-memory database and include:
 
 **Aarav Jain**
 [GitHub](https://github.com/aaravjain5)
+
+---
+
+## License
+
+© 2026 Aarav Jain. All rights reserved.
+
+This project is shared publicly for portfolio and demonstration purposes only. You're welcome to read through the code and learn from it, but it is not licensed for reuse, redistribution, or submission as your own work.
