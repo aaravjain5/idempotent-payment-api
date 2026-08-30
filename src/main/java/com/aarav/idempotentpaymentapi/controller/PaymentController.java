@@ -27,4 +27,11 @@ public class PaymentController {
         PaymentResponse response = paymentService.processPayment(request, idempotencyKey);
         return ResponseEntity.ok(response);
     }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<PaymentResponse> getPayment(@PathVariable String id) {
+        PaymentResponse response = paymentService.getPaymentById(id);
+        return ResponseEntity.ok(response);
+    }
+
 }

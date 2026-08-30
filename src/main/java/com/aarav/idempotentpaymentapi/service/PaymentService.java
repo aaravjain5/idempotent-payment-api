@@ -10,6 +10,7 @@ import tools.jackson.databind.json.JsonMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 
@@ -27,13 +28,32 @@ public class PaymentService {
     }
 
     public PaymentResponse processPayment(PaymentRequest request, String idempotencyKey) {
+
         if (idempotencyKey != null) {
             Optional<IdempotencyKey> existing = idempotencyKeyRepository.findById(idempotencyKey);
-            if (existing.isPresent()) {
+
+            // Already completed by an earlier request — return the cached result
+            if (existing.isPresent() && existing.get().getResponseBody() != null) {
                 return deserializeResponse(existing.get().getResponseBody());
+            }
+
+            if (existing.isEmpty()) {
+                // Try to reserve this key. If two requests race here, only one insert succeeds.
+                try {
+                    IdempotencyKey reservation = new IdempotencyKey();
+                    reservation.setKey(idempotencyKey);
+                    idempotencyKeyRepository.saveAndFlush(reservation);
+                } catch (DataIntegrityViolationException e) {
+                    // Someone else reserved it a moment before us — wait for their result
+                    return waitForCachedResponse(idempotencyKey);
+                }
+            } else {
+                // Key is reserved but the original request hasn't finished yet
+                return waitForCachedResponse(idempotencyKey);
             }
         }
 
+        // We own this key (or none was provided) — safe to process the payment
         Payment payment = new Payment();
         payment.setOrderId(request.getOrderId());
         payment.setAmount(request.getAmount());
@@ -43,32 +63,43 @@ public class PaymentService {
         Payment saved = paymentRepository.save(payment);
 
         PaymentResponse response = new PaymentResponse(
-                saved.getId(),
-                saved.getOrderId(),
-                saved.getAmount(),
-                saved.getCurrency(),
-                saved.getStatus(),
-                saved.getCreatedAt()
+                saved.getId(), saved.getOrderId(), saved.getAmount(),
+                saved.getCurrency(), saved.getStatus(), saved.getCreatedAt()
         );
 
         if (idempotencyKey != null) {
-            try {
-                IdempotencyKey keyRecord = new IdempotencyKey();
-                keyRecord.setKey(idempotencyKey);
-                keyRecord.setStatusCode(200);
-                keyRecord.setResponseBody(serializeResponse(response));
-                idempotencyKeyRepository.save(keyRecord);
-            } catch (DataIntegrityViolationException e) {
-                // Another concurrent request already saved this key first —
-                // return that request's cached response instead of our own
-                Optional<IdempotencyKey> raceWinner = idempotencyKeyRepository.findById(idempotencyKey);
-                if (raceWinner.isPresent()) {
-                    return deserializeResponse(raceWinner.get().getResponseBody());
-                }
-            }
+            IdempotencyKey record = idempotencyKeyRepository.findById(idempotencyKey).orElseThrow();
+            record.setStatusCode(200);
+            record.setResponseBody(serializeResponse(response));
+            idempotencyKeyRepository.save(record);
         }
 
         return response;
+    }
+
+    public PaymentResponse getPaymentById(String id) {
+        Payment payment = paymentRepository.findById(id)
+                .orElseThrow(() -> new com.aarav.idempotentpaymentapi.exception.PaymentNotFoundException(id));
+        return new PaymentResponse(
+                payment.getId(), payment.getOrderId(), payment.getAmount(),
+                payment.getCurrency(), payment.getStatus(), payment.getCreatedAt()
+        );
+    }
+
+    private PaymentResponse waitForCachedResponse(String key) {
+        // Poll briefly for the in-flight request to finish, instead of creating a duplicate
+        for (int i = 0; i < 10; i++) {
+            Optional<IdempotencyKey> found = idempotencyKeyRepository.findById(key);
+            if (found.isPresent() && found.get().getResponseBody() != null) {
+                return deserializeResponse(found.get().getResponseBody());
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        throw new IllegalStateException("Timed out waiting for a concurrent request with the same idempotency key to complete");
     }
 
     private String serializeResponse(PaymentResponse response) {
