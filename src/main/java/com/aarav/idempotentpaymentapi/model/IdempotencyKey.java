@@ -8,7 +8,8 @@ import java.time.LocalDateTime;
 public class IdempotencyKey {
 
     @Id
-    private String key; // UUID sent by client in header
+    @Column(name = "idempotency_key")
+    private String key;
 
     @Column(columnDefinition = "TEXT")
     private String responseBody; // cached JSON response
